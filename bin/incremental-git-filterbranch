@@ -4,6 +4,7 @@
 # way.
 #
 # Copyright (c) Michele Locati, 2018
+# v1.1 portions Copyright (c) Faster IT GmbH, 2018
 #
 # MIT license
 # https://github.com/concrete5/incremental-filter-branch/blob/master/LICENSE
@@ -54,6 +55,10 @@ Where:
 --workdir workdirpath
 	set the path to the directory where the temporary local repositories are created.
 	By default, we'll use a directory named temp in the current directory.
+--tempdir tempdirpath
+	set the path for the tree-filter to create temporary checkouts in
+	By default, we'll use a subdirectory of /dev/shm. This needs to be in a tmpfs
+	to be fast.
 --branch-whitelist <whitelist>
 	a whitespace-separated list of branches to be included in the process.
 	Multiple options can be specified.
@@ -94,6 +99,7 @@ sourcerepository
 	The URL or path to the source repository.
 filter
 	The list of parameters to be passed to the git filter-branch command.
+	Please add only one parameter to --tree-filter as the quote escaping is hell otherwise.
 destinationrepository
 	The URL or path to the destination repository.
 
@@ -111,6 +117,7 @@ Please remark that these regular expressions should comply the POSIX ERE (Extend
 #   $@: all the command line parameters
 readParameters () {
 	WORK_DIRECTORY="$(pwd)/temp"
+	TEMP_DIRECTORY="/dev/shm"
 	BRANCH_WHITELIST=''
 	BRANCH_BLACKLIST=''
 	TAG_WHITELIST=''
@@ -146,6 +153,18 @@ readParameters () {
 				if test -z "${WORK_DIRECTORY}"
 				then
 					die 'The working directory option is empty'
+				fi
+				shift 2
+				;;
+			--tempdir)
+				if test $# -lt 2
+				then
+					usage 'Not enough arguments'
+				fi
+				TEMP_DIRECTORY="${2}"
+				if test -z "${TEMP_DIRECTORY}"
+				then
+					die 'The temp directory option is empty'
 				fi
 				shift 2
 				;;
@@ -286,7 +305,6 @@ readParameters () {
 	DESTINATION_REPOSITORY_URL=$(absolutizePath "${DESTINATION_REPOSITORY_URL}")
 }
 
-
 # Check if a string is a directory. If so, return its absolute path, otherwise the string itself.
 #
 # Arguments:
@@ -415,6 +433,15 @@ acquireLock () {
 			fi
 			echo 'Lock detected... Waiting that it becomes available...'
 		done
+	fi
+}
+
+# Release a lock and clean up the filesystem file
+releaseLock () {
+	if test -z "${NO_LOCK}"
+	then
+		flock -u 9
+		rm -f "${WORKER_REPOSITORY_DIR}.lock" 2>/dev/null
 	fi
 }
 
@@ -623,7 +650,7 @@ processBranch () {
 		echo '  - initializing filter'
 		rm -f "${WORKER_REPOSITORY_DIR}/refs/filter-branch/originals/${1}/refs/heads/filter-branch/result/${1}"
 		git -C "${WORKER_REPOSITORY_DIR}" branch --force "filter-branch/result/${1}" FETCH_HEAD
-		rm -rf "${WORKER_REPOSITORY_DIR}.filter-branch"
+		rm -rf "${TEMP_DIRECTORY}/.filter-branch"
 		echo "  - filtering commits"
 		processBranch_tags=''
 		if test -z "${TAGS_PLAN}"
@@ -646,7 +673,7 @@ processBranch () {
 			${FILTER} \
 			--remap-to-ancestor \
 			--tag-name-filter "${processBranch_tagNameFilter}" \
-			-d "${WORKER_REPOSITORY_DIR}.filter-branch" \
+			-d "${TEMP_DIRECTORY}/.filter-branch" \
 			--original "refs/filter-branch/originals/${1}" \
 			--state-branch "refs/filter-branch/state" \
 			--force \
@@ -937,4 +964,5 @@ prepareWorkerRepository
 removeTranslatedTags
 processBranches
 pruneDestination
+releaseLock
 echo "All done."

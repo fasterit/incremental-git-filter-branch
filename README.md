@@ -15,6 +15,7 @@ the first time `filter-branch` still requires some time, but following calls can
 
 - git 2.16.0 or newer
 - common commands (`sed`, `grep`, `md5sum`, `cut`, ...)
+- sufficient space in /dev/shm or a different location specified with `--tempdir` to run filters
 
 
 ## Usage
